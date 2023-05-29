@@ -35,6 +35,12 @@ To execute the project, you need to run the following command:
 php artisan scrap-majestic
 ```
 
+If you have some problem with the memory limit, you can increase it by running the following command:
+
+```bash
+php -d memory_limit=512M artisan scrap-majestic
+```
+
 ## License
 
 This project is licensed under the [GNU GPL v2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html) license or higher.
