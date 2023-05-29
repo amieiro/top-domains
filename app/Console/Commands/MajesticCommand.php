@@ -99,7 +99,7 @@ class MajesticCommand extends Command {
 	 *
 	 * @var int
 	 */
-	protected int $domain_offset = 0;
+	protected int $domain_offset = 100000;
 
 	/**
 	 * Create a new command instance.
@@ -159,20 +159,24 @@ class MajesticCommand extends Command {
 	 * @return bool
 	 */
 	protected function is_WordPress( string $domain, Response $response ): bool {
-		if ( str_contains( $response->getHeaderLine( 'link' ), 'rel="https://api.w.org/"' ) ) {
-			return true;
-		}
-		if ( str_contains( $response->getBody(), '<meta name="generator" content="WordPress' ) ) {
-			return true;
-		}
-		if ( str_contains( $response->getBody(), $domain . '/wp-content/' ) ) {
-			return true;
-		}
-		if ( str_contains( $response->getBody(), $domain . '/wp-includes/' ) ) {
-			return true;
-		}
-		if ( str_contains( $response->getBody(), $domain . '/wp-admin/' ) ) {
-			return true;
+		try {
+			if ( str_contains( $response->getHeaderLine( 'link' ), 'rel="https://api.w.org/"' ) ) {
+				return true;
+			}
+			if ( str_contains( $response->getBody(), '<meta name="generator" content="WordPress' ) ) {
+				return true;
+			}
+			if ( str_contains( $response->getBody(), $domain . '/wp-content/' ) ) {
+				return true;
+			}
+			if ( str_contains( $response->getBody(), $domain . '/wp-includes/' ) ) {
+				return true;
+			}
+			if ( str_contains( $response->getBody(), $domain . '/wp-admin/' ) ) {
+				return true;
+			}
+		} catch ( \Exception $e ) {
+			return false;
 		}
 
 		return false;
