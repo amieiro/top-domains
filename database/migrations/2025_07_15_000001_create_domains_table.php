@@ -17,7 +17,8 @@ class CreateDomainsTable extends Migration
             $table->id();
             $table->foreignId('batch_id')->constrained('batches')->onDelete('cascade');
             $table->string('domain');
-            $table->enum('is_wordpress', ['yes', 'no', 'untested'])->default('untested');    $table->timestamps();
+            $table->enum('is_wordpress', ['yes', 'no', 'untested', 'no_http_reply'])->default('untested');    
+            $table->timestamps();
         });
     }
 
