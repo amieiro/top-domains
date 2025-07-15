@@ -3,7 +3,15 @@
 This Laravel project scraps the top 1 million websites and shows the number of websites using WordPress.
 Currently, the project only scraps the top 1 million websites from [Majestic](https://majestic.com/reports/majestic-million).
 
-You can find other top 1 millions lists [here](https://github.com/PeterDaveHello/top-1m-domains).
+# List sources
+
+These project uses 5 different sources to get the list with the top domains. I get this list [here](https://github.com/PeterDaveHello/top-1m-domains).
+
+- [Cisco Umbrella](https://s3-us-west-1.amazonaws.com/umbrella-static/index.html). [Download link](https://s3-us-west-1.amazonaws.com/umbrella-static/top-1m.csv.zip). 
+- [Majestic](https://majestic.com/reports/majestic-million). [Download link](https://downloads.majestic.com/majestic_million.csv).
+- [Build With](https://builtwith.com/top-1m). [Download link](https://builtwith.com/dl/builtwith-top1m.zip).
+- [DomCop](https://www.domcop.com/top-10-million-websites). [Download link](https://www.domcop.com/files/top/top10milliondomains.csv.zip).
+- [Tranco](https://tranco-list.eu/). [Download link](https://tranco-list.eu/top-1m.csv.zip).
 
 ## Requirements
 
