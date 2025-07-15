@@ -1,4 +1,4 @@
-# WordPress scrapper
+# WordPress scraper
 
 This Laravel project scraps the top 1 million websites and shows the number of websites using WordPress.
 Currently, the project only scraps the top 1 million websites from [Majestic](https://majestic.com/reports/majestic-million).
