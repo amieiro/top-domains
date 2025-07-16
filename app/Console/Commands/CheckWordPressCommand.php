@@ -14,7 +14,13 @@ class CheckWordPressCommand extends Command {
 	 *
 	 * @var string
 	 */
-	protected $signature = 'top-domains:check-wp {--resume} {request_timeout?} {domains_per_batch?} {concurrent_requests?} {show_temp_results_every?} {domain_offset?}';
+	protected $signature = 'top-domains:check-wp
+		{--resume : Resume the last incomplete batch instead of starting a new one}
+		{request_timeout? : Timeout in seconds for each HTTP request (default: 10)}
+		{domains_per_batch? : Number of domains to process per batch (default: 200)}
+		{concurrent_requests? : Number of concurrent HTTP requests (default: 200)}
+		{show_temp_results_every? : Show temporary results every X websites tested (default: 200)}
+		{domain_offset? : Number of domains to skip from the top of the list (default: 600000)}';
 
 	/**
 	 * The console command description.
