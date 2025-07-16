@@ -41,6 +41,8 @@ class DownloadTopDomains extends Command
      */
     public function handle()
     {
+        ini_set('memory_limit', '512M');
+
         $source = $this->argument('source');
 
         if ($source === 'all') {
@@ -103,17 +105,17 @@ class DownloadTopDomains extends Command
     private function unzipFile(string $filePath, string $source)
     {
         $zip = new ZipArchive();
-        $fullPath = storage_path("app/$filePath");
+        $fullPath = storage_path("app/private/$filePath");
 
         if ($zip->open($fullPath) === true) {
             $filename = $zip->getNameIndex(0);
-            $zip->extractTo(storage_path('app'), $filename);
+            $zip->extractTo(storage_path('app/private'), $filename);
             $zip->close();
             $this->info("File unzipped successfully.");
-            $this->info("Extracted file path: " . storage_path("app/$filename"));
+            $this->info("Extracted file path: " . storage_path("app/private/$filename"));
             // Rename the extracted file to a consistent name
-            $extractedFilePath = storage_path("app/$filename");
-            $finalFilePath = storage_path("app/$source.csv");
+            $extractedFilePath = storage_path("app/private/$filename");
+            $finalFilePath = storage_path("app/private/$source.csv");
             if (file_exists($extractedFilePath)) {
                 rename($extractedFilePath, $finalFilePath);
                 $this->info("Extracted file renamed to: $finalFilePath");

@@ -29,8 +29,11 @@ class ImportDomainsCommand extends Command
      */
     public function handle()
     {
+        ini_set('memory_limit', '512M');
+        
+        $this->info('Starting domain import...');
         $fileName = $this->argument('file');
-        $filePath = storage_path("app/{$fileName}.csv");
+        $filePath = storage_path("app/private/{$fileName}.csv");
 
         if (!file_exists($filePath)) {
             $this->error("File {$fileName}.csv does not exist.");
@@ -38,7 +41,7 @@ class ImportDomainsCommand extends Command
         }
 
         $maxDomains = $this->option('max-rows') ?? (env('APP_DEBUG') ? 100 : null);
-
+        $this->info("Max domains to import: " . ($maxDomains ?: 'unlimited'));
         $fileHandle = fopen($filePath, 'r');
         if (!$fileHandle) {
             $this->error("Unable to open file {$fileName}.csv.");
@@ -56,18 +59,19 @@ class ImportDomainsCommand extends Command
             }
 
             if ($maxDomains && $rowCount >= $maxDomains) {
+                $this->info("Max domains limit reached: $maxDomains");
                 break;
             }
         }
 
         fclose($fileHandle);
-
+        $this->info("Total domains read: {$rowCount}");
         $batchId = DB::table('batches')->insertGetId([
             'provider' => $fileName,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
-
+        $this->info("Batch created with ID: $batchId");
         $now = now();
         foreach (array_chunk($domains, 100) as $chunk) {
             foreach ($chunk as &$domain) {
@@ -92,6 +96,7 @@ class ImportDomainsCommand extends Command
      */
     private function extractDomain(string $fileName, array $row): ?string
     {
+        //$this->info("Processing file: $fileName" . " with row: " . implode(',', $row));
         switch ($fileName) {
             case 'umbrella':
             case 'builtwith':

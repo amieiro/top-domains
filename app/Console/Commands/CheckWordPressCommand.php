@@ -200,7 +200,7 @@ class CheckWordPressCommand extends Command {
 		if ($tested % $this->show_temp_results_every == 0) {
 			$percentage = round(($wordpress / ($wordpress + $notWordPress)) * 100, 2);
 			$secondsElapsed = Carbon::now()->diffInSeconds($startTime);
-			$secondsPerRequest = round($secondsElapsed / $tested, 3);
+			$secondsPerRequest = round(abs($secondsElapsed) / $tested, 3);
 			$this->info(
                 "----------------------------------------------------------------\n" .
 				"$tested websites tested so far: " .
