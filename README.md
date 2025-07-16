@@ -1,114 +1,105 @@
-# WordPress scraper
+# WordPress Detection and Analysis Tool
 
-This project scraps the top 1 million websites and shows the number of websites using WordPress.
+This project analyzes the top 1 million websites to identify those using WordPress. It provides detailed insights into WordPress adoption across various domains.
 
-# List sources
+## List Sources
 
-This project uses 5 different sources to get the list with the top domains. I get this list [here](https://github.com/PeterDaveHello/top-1m-domains).
+This project uses five different sources to gather lists of top domains. The sources and their download links are:
 
-- [Cisco Umbrella](https://s3-us-west-1.amazonaws.com/umbrella-static/index.html). [Download link](https://s3-us-west-1.amazonaws.com/umbrella-static/top-1m.csv.zip). 1 M rows.
-- [Majestic](https://majestic.com/reports/majestic-million). [Download link](https://downloads.majestic.com/majestic_million.csv). 1 M rows.
-- [Build With](https://builtwith.com/top-1m). [Download link](https://builtwith.com/dl/builtwith-top1m.zip). 1 M rows.
-- [DomCop](https://www.domcop.com/top-10-million-websites). [Download link](https://www.domcop.com/files/top/top10milliondomains.csv.zip). 10 M rows.
-- [Tranco](https://tranco-list.eu/). [Download link](https://tranco-list.eu/top-1m.csv.zip). 1 M rows.
+- [Cisco Umbrella](https://s3-us-west-1.amazonaws.com/umbrella-static/index.html): [Download link](https://s3-us-west-1.amazonaws.com/umbrella-static/top-1m.csv.zip) (1 million rows).
+- [Majestic](https://majestic.com/reports/majestic-million): [Download link](https://downloads.majestic.com/majestic_million.csv) (1 million rows).
+- [BuiltWith](https://builtwith.com/top-1m): [Download link](https://builtwith.com/dl/builtwith-top1m.zip) (1 million rows).
+- [DomCop](https://www.domcop.com/top-10-million-websites): [Download link](https://www.domcop.com/files/top/top10milliondomains.csv.zip) (10 million rows).
+- [Tranco](https://tranco-list.eu/): [Download link](https://tranco-list.eu/top-1m.csv.zip) (1 million rows).
 
 ## Requirements
 
-This project uses Laravel 12, so you need to have [PHP 8.2](https://laravel.com/docs/12.x/deployment#server-requirements) 
-or higher installed on your machine. I have tested this project on PHP 8.4.
+This project is built using Laravel 12 and requires [PHP 8.2](https://laravel.com/docs/12.x/deployment#server-requirements) or higher. It has been tested on PHP 8.4.
 
 ## Installation
 
-You need to have [Composer](https://getcomposer.org/) installed on your machine.
-You can install it by following the instructions on the [Composer website](https://getcomposer.org/download/).
-You also need to have [Git](https://git-scm.com/) installed on your machine.
-Once you have installed Composer and Git, you can clone this repository by running the following command:
+To set up the project, ensure you have [Composer](https://getcomposer.org/) and [Git](https://git-scm.com/) installed on your machine. Follow these steps:
 
-```bash
-git clone git@github.com:amieiro/top-domains.git
-```
+1. Clone the repository:
+   ```bash
+   git clone git@github.com:amieiro/top-domains.git
+   ```
 
-After cloning the repository, you need to install the dependencies by running the following command:
+2. Install dependencies:
+   ```bash
+   composer install
+   ```
 
-```bash
-composer install
-```
+3. Create an SQLite database:
+   ```bash
+   touch database/database.sqlite
+   ```
 
-Then you need to create a [SQLite](https://www.sqlite.org/) database. 
+4. Set up the environment file:
+   ```bash
+   cp .env.example .env
+   ```
 
-```bash
-touch database\database.sqlite
-```
+5. Generate the application key:
+   ```bash
+   php artisan key:generate
+   ```
 
-And to create a .env file.
+## Execution
 
-```bash
-cp .env.example .env
-```
+To execute the project, follow these steps:
 
-Finally, you need to set the application key.
+1. **Clean the database** (if needed):
+   ```bash
+   php artisan migrate:fresh
+   ```
 
-```bash
-php artisan key:generate
-```
+2. **Download domain lists**:
+   - Download all files:
+     ```bash
+     php artisan top-domains:download all
+     ```
+   - Download a specific file:
+     ```bash
+     php artisan top-domains:download provider
+     ```
+     Replace `provider` with one of the following:
+     - umbrella
+     - majestic
+     - builtwith
+     - domcop
+     - tranco
 
-## Execution 
+3. **Import domains into the database**:
+   ```bash
+   php artisan top-domains:import provider
+   ```
+   Replace `provider` with one of the providers listed above.
 
-To execute the project, you need to run some commands.
+4. **Analyze WordPress usage**:
+   ```bash
+   php artisan top-domains:check-wp
+   ```
 
-Execute this command if you need to clean the database:
+### Command Parameters
 
-```bash
-php artisan migrate:fresh
-```
+The `top-domains:check-wp` command supports the following parameters:
 
-Then you need to download the CSV file with the domains. To do these, you can run:
+- `resume`: Resume the last incomplete batch instead of starting a new one.
+- `request_timeout`: Timeout in seconds for each HTTP request (default: 10).
+- `domains_per_batch`: Number of domains to process per batch (default: 200).
+- `concurrent_requests`: Number of concurrent HTTP requests (default: 200).
+- `show_temp_results_every`: Show temporary results every X websites tested (default: 200).
+- `domain_offset`: Number of domains to skip from the top of the list (default: 600,000).
 
-```bash
-php artisan top-domains:download all 
-```
-
-to download the 5 files or you can run:
-
-```bash
-php artisan top-domains:download provider 
-```
-to download only 1 file. Replace `provider` with one of these providers:
-  - umbrella
-  - majestic
-  - builtwith
-  - domcop
-  - tranco
-
-Once you have the CSV dowloaded, you need to import to the database. To do it, run:
-
-```bash
-php artisan top-domains:import provider
-```
-
-Replace `provider` with one of the providers showed above.
-
-Finally, you can run the check:
-
-```bash
-php artisan top-domains:check-wp
-```
-
-You have some parameter for this command:
-
-  - resume: Resume the last incomplete batch instead of starting a new one
-  - request_timeout: Timeout in seconds for each HTTP request (default: 10)
-  - domains_per_batch: Number of domains to process per batch (default: 200)
-  - concurrent_requests: Number of concurrent HTTP requests (default: 200)
-  - show_temp_results_every: Show temporary results every X websites tested (default: 200)
-  - domain_offset: Number of domains to skip from the top of the list (default: 600000)}'
-
+Example:
 ```bash
 php artisan top-domains:check-wp --resume --request_timeout=20 --domains_per_batch=500 --concurrent_requests=250 --show_temp_results_every=1000 --domain_offset=500000
 ```
 
-If you have some problem with the memory limit, you can increase it by running the following command:
+### Memory Limit
 
+If you encounter memory limit issues, increase the limit by running:
 ```bash
 php -d memory_limit=1024M artisan top-domains:check-wp
 ```
