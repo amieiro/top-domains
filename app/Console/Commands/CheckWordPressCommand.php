@@ -14,7 +14,7 @@ class CheckWordPressCommand extends Command {
 	 *
 	 * @var string
 	 */
-	protected $signature = 'top-domains:check-wp {--resume}';
+	protected $signature = 'top-domains:check-wp {--resume} {request_timeout?} {domains_per_batch?} {concurrent_requests?} {show_temp_results_every?} {domain_offset?}';
 
 	/**
 	 * The console command description.
@@ -80,12 +80,29 @@ class CheckWordPressCommand extends Command {
 	 *
 	 * @var int
 	 */
-	protected int $domain_offset = 500000;
+	protected int $domain_offset = 600000;
+
+	/** 
+	 * Whether the application is in debug mode.
+	 * 
+	 * @var bool
+	 */
+	protected bool $appDebug;
 
 	/**
 	 * Execute the console command.
 	 */
 	public function handle() {
+		ini_set('memory_limit', '512M');
+
+		$this->request_timeout = $this->argument('request_timeout') ?? $this->request_timeout;
+		$this->domains_per_batch = $this->argument('domains_per_batch') ?? $this->domains_per_batch;
+		$this->concurrent_requests = $this->argument('concurrent_requests') ?? $this->concurrent_requests;
+		$this->show_temp_results_every = $this->argument('show_temp_results_every') ?? $this->show_temp_results_every;
+		$this->domain_offset = $this->argument('domain_offset') ?? $this->domain_offset;
+
+		$this->appDebug = env('APP_DEBUG', false);
+
 		$batch = $this->getBatch();
 		if (!$batch) {
 			$this->info('No batch found to process.');
@@ -197,7 +214,7 @@ class CheckWordPressCommand extends Command {
 	 * @param Carbon $startTime
 	 */
 	protected function showTempResults(int $tested, int $wordpress, int $notWordPress, int $noReply, Carbon $startTime): void {
-		if ($tested % $this->show_temp_results_every == 0) {
+		if ($this->appDebug && $tested % $this->show_temp_results_every == 0) {
 			$percentage = round(($wordpress / ($wordpress + $notWordPress)) * 100, 2);
 			$secondsElapsed = Carbon::now()->diffInSeconds($startTime);
 			$secondsPerRequest = round(abs($secondsElapsed) / $tested, 3);
