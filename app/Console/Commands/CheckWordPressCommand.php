@@ -16,11 +16,11 @@ class CheckWordPressCommand extends Command {
 	 */
 	protected $signature = 'top-domains:check-wp
 		{--resume : Resume the last incomplete batch instead of starting a new one}
-		{request_timeout? : Timeout in seconds for each HTTP request (default: 10)}
-		{domains_per_batch? : Number of domains to process per batch (default: 200)}
-		{concurrent_requests? : Number of concurrent HTTP requests (default: 200)}
-		{show_temp_results_every? : Show temporary results every X websites tested (default: 200)}
-		{domain_offset? : Number of domains to skip from the top of the list (default: 600000)}';
+		{--request_timeout= : Timeout in seconds for each HTTP request (default: 10)}
+		{--domains_per_batch= : Number of domains to process per batch (default: 200)}
+		{--concurrent_requests= : Number of concurrent HTTP requests (default: 200)}
+		{--show_temp_results_every= : Show temporary results every X websites tested (default: 200)}
+		{--domain_offset= : Number of domains to skip from the top of the list (default: 600000)}';
 
 	/**
 	 * The console command description.
@@ -101,11 +101,12 @@ class CheckWordPressCommand extends Command {
 	public function handle() {
 		ini_set('memory_limit', '512M');
 
-		$this->request_timeout = $this->argument('request_timeout') ?? $this->request_timeout;
-		$this->domains_per_batch = $this->argument('domains_per_batch') ?? $this->domains_per_batch;
-		$this->concurrent_requests = $this->argument('concurrent_requests') ?? $this->concurrent_requests;
-		$this->show_temp_results_every = $this->argument('show_temp_results_every') ?? $this->show_temp_results_every;
-		$this->domain_offset = $this->argument('domain_offset') ?? $this->domain_offset;
+		// Ensure proper casting of options to their respective types
+		$this->request_timeout = (int) ($this->option('request_timeout') ?? $this->request_timeout);
+		$this->domains_per_batch = (int) ($this->option('domains_per_batch') ?? $this->domains_per_batch);
+		$this->concurrent_requests = (int) ($this->option('concurrent_requests') ?? $this->concurrent_requests);
+		$this->show_temp_results_every = (int) ($this->option('show_temp_results_every') ?? $this->show_temp_results_every);
+		$this->domain_offset = (int) ($this->option('domain_offset') ?? $this->domain_offset);
 
 		$this->appDebug = env('APP_DEBUG', false);
 
