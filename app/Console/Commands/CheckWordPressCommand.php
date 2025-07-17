@@ -99,7 +99,7 @@ class CheckWordPressCommand extends Command {
 	 * Execute the console command.
 	 */
 	public function handle() {
-		ini_set('memory_limit', '512M');
+		ini_set('memory_limit', '2G');
 
 		// Ensure proper casting of options to their respective types
 		$this->request_timeout = (int) ($this->option('request_timeout') ?? $this->request_timeout);
