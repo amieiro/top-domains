@@ -96,6 +96,23 @@ Example:
 ```bash
 php artisan top-domains:check-wp --resume --request_timeout=20 --domains_per_batch=500 --concurrent_requests=250 --show_temp_results_every=1000 --domain_offset=500000
 ```
+### Running in the Background
+
+To run the WordPress check command in the background and log its output, use:
+
+```bash
+php artisan top-domains:check-wp --domain_offset=0 > storage/logs/$(date +%F-%H-%M).log 2>&1 &
+```
+
+This command will start the process in the background and save the output to a timestamped log file.
+
+To monitor the progress, tail the latest log file (replace the filename with the actual log):
+
+```bash
+tail -f storage/logs/2024-06-13-15-30.log
+```
+
+Update the log filename as needed to match the file created by your command.
 
 ### Memory Limit
 
