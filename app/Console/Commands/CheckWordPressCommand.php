@@ -227,10 +227,10 @@ class CheckWordPressCommand extends Command {
 			$secondsPerRequest = round(abs($secondsElapsed) / $tested, 3);
 			$this->info(
                 "----------------------------------------------------------------\n" .
-				"$tested websites tested so far: " .
-				"$wordpress are using WordPress ($percentage%), " .
-				"$notWordPress are not using WordPress, " .
-				"$noReply did not reply.\n" .
+				number_format($tested) . " websites tested so far: " .
+				number_format($wordpress) . " are using WordPress ($percentage%), " .
+				number_format($notWordPress) . " are not using WordPress, " .
+				number_format($noReply) . " did not reply.\n" .
 				"Started {$startTime->diffForHumans()}: $secondsPerRequest s per request."
 			);
 		}
