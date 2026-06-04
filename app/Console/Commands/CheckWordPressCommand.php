@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\CappedStream;
 use App\Support\WordPressDetector;
 use Carbon\Carbon;
 use GuzzleHttp\Client;
@@ -252,6 +253,12 @@ class CheckWordPressCommand extends Command
                             'allow_redirects' => true,
                             'timeout' => $this->request_timeout,
                             'connect_timeout' => $this->connect_timeout,
+                            // Buffer the body into a bounded in-memory sink so large
+                            // responses never spill to a temporary file on disk.
+                            'sink' => new CappedStream(
+                                Utils::streamFor(fopen('php://memory', 'r+')),
+                                $this->max_body_bytes
+                            ),
                         ]
                     );
                 };
