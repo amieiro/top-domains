@@ -23,7 +23,7 @@ class CheckWordPressCommand extends Command
     protected $signature = 'top-domains:check-wp
 		{--resume : Resume the last incomplete batch instead of starting a new one}
 		{--request_timeout= : Timeout in seconds for each HTTP request (default: 10)}
-		{--connect_timeout= : Timeout in seconds for establishing the connection (default: 4)}
+		{--connect_timeout= : Timeout in seconds for establishing the connection (default: 8)}
 		{--domains_per_batch= : Number of domains to process per batch (default: 200)}
 		{--concurrent_requests= : Number of concurrent HTTP requests (default: 200)}
 		{--show_temp_results_every= : Show temporary results every X websites tested (default: 200)}
@@ -51,7 +51,7 @@ class CheckWordPressCommand extends Command
      * The timeout for establishing the connection. Failing fast on dead hosts
      * frees a concurrency slot instead of waiting for the full request timeout.
      */
-    protected int $connect_timeout = 4;
+    protected int $connect_timeout = 8;
 
     /**
      * The number of domains to process in each batch.
@@ -69,11 +69,12 @@ class CheckWordPressCommand extends Command
     protected int $show_temp_results_every = 200;
 
     /**
-     * Maximum number of body bytes to read and inspect per response. WordPress
-     * fingerprints live in the document head and early body, so a cap keeps
-     * parsing cheap on media-heavy pages without losing detections.
+     * Maximum number of body bytes to read and inspect per response. Most
+     * WordPress fingerprints live in the document head, but some sites only
+     * reference /wp-content/ a few hundred KB in, so 512 KB captures them while
+     * keeping memory bounded (cap x concurrency) and parsing cheap.
      */
-    protected int $max_body_bytes = 131072;
+    protected int $max_body_bytes = 524288;
 
     /**
      * The start time of the batch processing.
