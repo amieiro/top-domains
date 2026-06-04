@@ -2,425 +2,357 @@
 
 namespace App\Console\Commands;
 
+use App\Support\WordPressDetector;
 use Carbon\Carbon;
 use GuzzleHttp\Client;
 use GuzzleHttp\Pool;
+use GuzzleHttp\Psr7\Response;
+use GuzzleHttp\Psr7\Utils;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-class CheckWordPressCommand extends Command {
-	/**
-	 * The name and signature of the console command.
-	 *
-	 * @var string
-	 */
-	protected $signature = 'top-domains:check-wp
+class CheckWordPressCommand extends Command
+{
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'top-domains:check-wp
 		{--resume : Resume the last incomplete batch instead of starting a new one}
 		{--request_timeout= : Timeout in seconds for each HTTP request (default: 10)}
+		{--connect_timeout= : Timeout in seconds for establishing the connection (default: 4)}
 		{--domains_per_batch= : Number of domains to process per batch (default: 200)}
 		{--concurrent_requests= : Number of concurrent HTTP requests (default: 200)}
 		{--show_temp_results_every= : Show temporary results every X websites tested (default: 200)}
 		{--domain_offset= : Number of domains to skip from the top of the list (default: 600000)}';
 
-	/**
-	 * The console command description.
-	 *
-	 * @var string
-	 */
-	protected $description = 'Check if websites in the domains table are using WordPress.';
+    /**
+     * The console command description.
+     *
+     * @var string
+     */
+    protected $description = 'Check if websites in the domains table are using WordPress.';
 
-	/**
-	 * The user agent to use for the requests.
-	 *
-	 * @var string
-	 */
+    /**
+     * The user agent to use for the requests.
+     */
     protected string $userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
-	/**
-	 * The timeout for each request.
-	 *
-	 * @var int
-	 */
-	protected int $request_timeout = 10;
+    /**
+     * The timeout for each request.
+     */
+    protected int $request_timeout = 10;
 
-	/**
-	 * The number of domains to process in each batch.
-	 *
-	 * @var int
-	 */
-	protected int $domains_per_batch = 200;
+    /**
+     * The timeout for establishing the connection. Failing fast on dead hosts
+     * frees a concurrency slot instead of waiting for the full request timeout.
+     */
+    protected int $connect_timeout = 4;
 
-	/**
-	 * The number of concurrent requests to send.
-	 *
-	 * @var int
-	 */
-	protected int $concurrent_requests = 200;
+    /**
+     * The number of domains to process in each batch.
+     */
+    protected int $domains_per_batch = 200;
 
-	/**
-	 * Show temporary results every X websites tested.
-	 *
-	 * @var int
-	 */
-	protected int $show_temp_results_every = 200;
+    /**
+     * The number of concurrent requests to send.
+     */
+    protected int $concurrent_requests = 200;
 
-	/**
-	 * The start time of the batch processing.
-	 *
-	 * @var \Carbon\Carbon
-	 */
-	protected Carbon $start_time;
+    /**
+     * Show temporary results every X websites tested.
+     */
+    protected int $show_temp_results_every = 200;
 
-	/**
-	 * Count of domains, WordPress, not WordPress, and no reply domains in the current batch.
-	 *
-	 * @var int
-	 */
+    /**
+     * Maximum number of body bytes to read and inspect per response. WordPress
+     * fingerprints live in the document head and early body, so a cap keeps
+     * parsing cheap on media-heavy pages without losing detections.
+     */
+    protected int $max_body_bytes = 131072;
+
+    /**
+     * The start time of the batch processing.
+     */
+    protected Carbon $start_time;
+
+    /**
+     * Count of domains, WordPress, not WordPress, and no reply domains in the current batch.
+     */
     protected int $domainsProcessed = 0;
-	protected int $wordpressCount = 0;
-	protected int $notWordPressCount = 0;
-	protected int $noReplyCount = 0;
 
-	/**
-	 * The number of domains to skip from the top of the list.
-	 *
-	 * @var int
-	 */
-	protected int $domain_offset = 600000;
+    protected int $wordpressCount = 0;
 
-	/** 
-	 * Whether the application is in debug mode.
-	 * 
-	 * @var bool
-	 */
-	protected bool $appDebug;
+    protected int $notWordPressCount = 0;
 
-	/**
-	 * Execute the console command.
-	 */
-	public function handle() {
-		ini_set('memory_limit', '2G');
+    protected int $noReplyCount = 0;
 
-		// Ensure proper casting of options to their respective types
-		$this->request_timeout = (int) ($this->option('request_timeout') ?? $this->request_timeout);
-		$this->domains_per_batch = (int) ($this->option('domains_per_batch') ?? $this->domains_per_batch);
-		$this->concurrent_requests = (int) ($this->option('concurrent_requests') ?? $this->concurrent_requests);
-		$this->show_temp_results_every = (int) ($this->option('show_temp_results_every') ?? $this->show_temp_results_every);
-		$this->domain_offset = (int) ($this->option('domain_offset') ?? $this->domain_offset);
+    /**
+     * The number of domains to skip from the top of the list.
+     */
+    protected int $domain_offset = 600000;
 
-		$this->appDebug = env('APP_DEBUG', false);
+    /**
+     * The first domain id to process, derived once from the offset so that
+     * pagination is keyset based instead of a costly per-iteration OFFSET.
+     */
+    protected int $start_id = 0;
 
-		$batch = $this->getBatch();
-		if (!$batch) {
-			$this->info('No batch found to process.');
-			return;
-		}
+    /**
+     * Whether the application is in debug mode.
+     */
+    protected bool $appDebug;
 
-		$this->info('Processing batch ID: ' . $batch->id);
+    /**
+     * A single Guzzle client reused across batches so connections can be pooled.
+     */
+    protected Client $client;
+
+    /**
+     * The WordPress fingerprint detector.
+     */
+    protected WordPressDetector $detector;
+
+    /**
+     * Execute the console command.
+     */
+    public function handle()
+    {
+        ini_set('memory_limit', '2G');
+
+        // Ensure proper casting of options to their respective types
+        $this->request_timeout = (int) ($this->option('request_timeout') ?? $this->request_timeout);
+        $this->connect_timeout = (int) ($this->option('connect_timeout') ?? $this->connect_timeout);
+        $this->domains_per_batch = (int) ($this->option('domains_per_batch') ?? $this->domains_per_batch);
+        $this->concurrent_requests = (int) ($this->option('concurrent_requests') ?? $this->concurrent_requests);
+        $this->show_temp_results_every = (int) ($this->option('show_temp_results_every') ?? $this->show_temp_results_every);
+        $this->domain_offset = (int) ($this->option('domain_offset') ?? $this->domain_offset);
+
+        $this->appDebug = env('APP_DEBUG', false);
+        $this->client = new Client;
+        $this->detector = new WordPressDetector;
+
+        $batch = $this->getBatch();
+        if (! $batch) {
+            $this->info('No batch found to process.');
+
+            return;
+        }
+
+        $this->info('Processing batch ID: '.$batch->id);
         if ($this->domain_offset > 0) {
             $this->info("Skipping the first {$this->domain_offset} domains in the batch.");
         }
-		DB::table('batches')->where('id', $batch->id)->update(['started' => true]);
+        $this->start_id = $this->resolveStartId($batch->id);
+        DB::table('batches')->where('id', $batch->id)->update(['started' => true]);
 
-		$this->start_time = Carbon::now();
+        $this->start_time = Carbon::now();
 
-		while (true) {
-			$domains = $this->getDomains($batch->id);
-			if ($domains->isEmpty()) {
-				$this->info('No more domains to process in this batch.');
-				break;
-			}
+        while (true) {
+            $domains = $this->getDomains($batch->id);
+            if ($domains->isEmpty()) {
+                $this->info('No more domains to process in this batch.');
+                break;
+            }
 
-			$responses = $this->makeConcurrentRequests($domains);
-			$this->processResponses($responses);
-		}
+            $responses = $this->makeConcurrentRequests($domains, 'https://');
+
+            // Retry hosts that failed over HTTPS using plain HTTP, since a share
+            // of them are only reachable there.
+            $failed = $domains->filter(fn ($domain) => $responses[$domain->id] === null)->values();
+            if ($failed->isNotEmpty()) {
+                foreach ($this->makeConcurrentRequests($failed, 'http://') as $domainId => $response) {
+                    if ($response !== null) {
+                        $responses[$domainId] = $response;
+                    }
+                }
+            }
+
+            $this->processResponses($responses);
+        }
 
         $timeElapsed = $this->start_time->diffForHumans(null, true);
         $this->info("Batch processing completed. Time elapsed: $timeElapsed.");
-	}
+    }
 
-	/**
-	 * Get the batch to process.
-	 *
-	 * @return object|null
-	 */
-	protected function getBatch() {
-		if ($this->option('resume')) {
-			return DB::table('batches')->where('started', true)->where('completed', false)->orderBy('id')->first();
-		}
-		return DB::table('batches')->where('started', false)->orderBy('id')->first();
-	}
+    /**
+     * Get the batch to process.
+     *
+     * @return object|null
+     */
+    protected function getBatch()
+    {
+        if ($this->option('resume')) {
+            return DB::table('batches')->where('started', true)->where('completed', false)->orderBy('id')->first();
+        }
 
-	/**
-	 * Get domains for the batch.
-	 *
-	 * @param int $batchId
-	 *
-	 * @return \Illuminate\Support\Collection
-	 */
-	protected function getDomains(int $batchId) {
-		return DB::table('domains')
-			->where('batch_id', $batchId)
-			->where('is_wordpress', 'untested')
-			->orderBy('id')
-			->offset($this->domain_offset)
-			->limit($this->domains_per_batch)
-			->get();
-	}
+        return DB::table('batches')->where('started', false)->orderBy('id')->first();
+    }
 
-	/**
-	 * Make concurrent requests.
-	 *
-	 * @param \Illuminate\Support\Collection $domains
-	 *
-	 * @return array
-	 */
-	protected function makeConcurrentRequests($domains): array {
-		$client = new Client();
-		$responses = [];
+    /**
+     * Resolve the first domain id to process from the configured offset. This
+     * runs once so subsequent fetches never pay the cost of a large OFFSET.
+     */
+    protected function resolveStartId(int $batchId): int
+    {
+        if ($this->domain_offset <= 0) {
+            return 0;
+        }
 
-		$requests = function () use ($domains, $client) {
-			foreach ($domains as $domain) {
-				yield function () use ($client, $domain) {
-					return $client->getAsync(
-						'https://' . $domain->domain,
-						[
-							'headers' => ['User-Agent' => $this->userAgent],
-							'allow_redirects' => true,
-							'timeout' => $this->request_timeout,
-						]
-					);
-				};
-			}
-		};
+        return (int) (DB::table('domains')
+            ->where('batch_id', $batchId)
+            ->orderBy('id')
+            ->offset($this->domain_offset)
+            ->limit(1)
+            ->value('id') ?? PHP_INT_MAX);
+    }
 
-		Pool::batch(
-			$client,
-			$requests(),
-			[
-				'concurrency' => $this->concurrent_requests,
-				'fulfilled' => function ($response, $index) use ($domains, &$responses) {
-					$responses[$domains[$index]->id] = $response;
-				},
-				'rejected' => function ($reason, $index) use ($domains, &$responses) {
-					$responses[$domains[$index]->id] = null;
-				},
-			]
-		);
+    /**
+     * Get domains for the batch.
+     *
+     * Keyset pagination: processed rows leave the 'untested' set, so we only
+     * need a lower bound on the id instead of a growing OFFSET.
+     *
+     *
+     * @return Collection
+     */
+    protected function getDomains(int $batchId)
+    {
+        return DB::table('domains')
+            ->where('batch_id', $batchId)
+            ->where('id', '>=', $this->start_id)
+            ->where('is_wordpress', 'untested')
+            ->orderBy('id')
+            ->limit($this->domains_per_batch)
+            ->get();
+    }
 
-		return $responses;
-	}
+    /**
+     * Make concurrent requests for a set of domains using the given scheme.
+     *
+     * @param  Collection  $domains
+     */
+    protected function makeConcurrentRequests($domains, string $scheme): array
+    {
+        $list = array_values($domains->all());
+        $responses = [];
 
-	/**
-	 * Show temporary results.
-	 *
-	 * @param int $tested
-	 * @param int $wordpress
-	 * @param int $notWordPress
-	 * @param int $noReply
-	 * @param Carbon $startTime
-	 */
-	protected function showTempResults(int $tested, int $wordpress, int $notWordPress, int $noReply, Carbon $startTime): void {
-		if ($this->appDebug && $tested % $this->show_temp_results_every == 0) {
-			$percentage = round(($wordpress / ($wordpress + $notWordPress)) * 100, 2);
-			$secondsElapsed = Carbon::now()->diffInSeconds($startTime);
-			$secondsPerRequest = round(abs($secondsElapsed) / $tested, 3);
-			$this->info(
-                "----------------------------------------------------------------\n" .
-				number_format($tested) . " websites tested so far: " .
-				number_format($wordpress) . " are using WordPress ($percentage%), " .
-				number_format($notWordPress) . " are not using WordPress, " .
-				number_format($noReply) . " did not reply.\n" .
-				"Started {$startTime->diffForHumans()}: $secondsPerRequest s per request."
-			);
-		}
-	}
+        $requests = function () use ($list, $scheme) {
+            foreach ($list as $domain) {
+                yield function () use ($domain, $scheme) {
+                    return $this->client->getAsync(
+                        $scheme.$domain->domain,
+                        [
+                            'headers' => [
+                                'User-Agent' => $this->userAgent,
+                                'Range' => 'bytes=0-'.($this->max_body_bytes - 1),
+                            ],
+                            'allow_redirects' => true,
+                            'timeout' => $this->request_timeout,
+                            'connect_timeout' => $this->connect_timeout,
+                        ]
+                    );
+                };
+            }
+        };
 
-	/**
-	 * Process responses.
-	 *
-	 * @param array $responses
-	 */
-	protected function processResponses(array $responses) {
-		$now = Carbon::now();
+        Pool::batch(
+            $this->client,
+            $requests(),
+            [
+                'concurrency' => $this->concurrent_requests,
+                'fulfilled' => function ($response, $index) use ($list, &$responses) {
+                    $responses[$list[$index]->id] = $response;
+                },
+                'rejected' => function ($reason, $index) use ($list, &$responses) {
+                    $responses[$list[$index]->id] = null;
+                },
+            ]
+        );
 
-		foreach ($responses as $domainId => $response) {
-			if ($response === null) {
-				DB::table('domains')->where('id', $domainId)->update([
-					'is_wordpress' => 'no_http_reply',
-					'updated_at' => $now,
-				]);
-				$this->noReplyCount++;
-				continue;
-			}
+        return $responses;
+    }
 
-			$status = $this->isWordPress($response);
-			DB::table('domains')->where('id', $domainId)->update([
-				'is_wordpress' => $status,
-				'updated_at' => $now,
-			]);
+    /**
+     * Show temporary results.
+     */
+    protected function showTempResults(int $tested, int $wordpress, int $notWordPress, int $noReply, Carbon $startTime): void
+    {
+        if ($this->appDebug && $tested % $this->show_temp_results_every == 0) {
+            $classified = $wordpress + $notWordPress;
+            $percentage = $classified > 0 ? round(($wordpress / $classified) * 100, 2) : 0;
+            $secondsElapsed = Carbon::now()->diffInSeconds($startTime);
+            $secondsPerRequest = round(abs($secondsElapsed) / $tested, 3);
+            $this->info(
+                "----------------------------------------------------------------\n".
+                number_format($tested).' websites tested so far: '.
+                number_format($wordpress)." are using WordPress ($percentage%), ".
+                number_format($notWordPress).' are not using WordPress, '.
+                number_format($noReply)." did not reply.\n".
+                "Started {$startTime->diffForHumans()}: $secondsPerRequest s per request."
+            );
+        }
+    }
 
-			if ($status === 'yes') {
-				$this->wordpressCount++;
-			} elseif ($status === 'no') {
-				$this->notWordPressCount++;
-			} else {
-				$this->noReplyCount++;
-			}
-		}
+    /**
+     * Process responses, writing all results for the batch in a single
+     * transaction grouped by status to minimise SQLite write overhead.
+     */
+    protected function processResponses(array $responses)
+    {
+        $now = Carbon::now();
+        $grouped = ['yes' => [], 'no' => [], 'no_http_reply' => []];
 
-		$this->domainsProcessed += count($responses);
-		$this->showTempResults($this->domainsProcessed, $this->wordpressCount, $this->notWordPressCount, $this->noReplyCount, $this->start_time);
-	}
+        foreach ($responses as $domainId => $response) {
+            $status = $this->classify($response);
+            $grouped[$status][] = $domainId;
 
-	/**
-	 * Check if the response indicates WordPress.
-	 *
-	 * @param \GuzzleHttp\Psr7\Response $response
-	 *
-	 * @return string
-	 */
-    protected function isWordPress($response): string {
+            if ($status === 'yes') {
+                $this->wordpressCount++;
+            } elseif ($status === 'no') {
+                $this->notWordPressCount++;
+            } else {
+                $this->noReplyCount++;
+            }
+        }
+
+        DB::transaction(function () use ($grouped, $now) {
+            foreach ($grouped as $status => $ids) {
+                foreach (array_chunk($ids, 500) as $chunk) {
+                    DB::table('domains')->whereIn('id', $chunk)->update([
+                        'is_wordpress' => $status,
+                        'updated_at' => $now,
+                    ]);
+                }
+            }
+        });
+
+        $this->domainsProcessed += count($responses);
+        $this->showTempResults($this->domainsProcessed, $this->wordpressCount, $this->notWordPressCount, $this->noReplyCount, $this->start_time);
+    }
+
+    /**
+     * Classify a single response into a status string.
+     *
+     * @param  Response|null  $response
+     */
+    protected function classify($response): string
+    {
+        if ($response === null) {
+            return 'no_http_reply';
+        }
+
         try {
-            $body = $response->getBody();
-            if (empty($body)) {
-                return 'no_http_reply';
+            $stream = $response->getBody();
+            if ($stream->isSeekable()) {
+                $stream->rewind();
             }
+            $body = Utils::copyToString($stream, $this->max_body_bytes);
 
-            // Check HTTP headers for WordPress-specific indicators
-            $headers = $response->getHeaders();
-			if (isset($headers['X-Powered-By']) && str_contains($headers['X-Powered-By'][0], 'WordPress')) {
-				return 'yes';
-			}
-            
-			if (isset($headers['X-Pingback']) && str_contains($headers['X-Pingback'][0], 'xmlrpc.php')) {
-				return 'yes';
-			}
-            
-			if (isset($headers['Link'])) {
-				foreach ($headers['Link'] as $linkHeader) {
-					if (str_contains($linkHeader, 'wp-json')) {
-						return 'yes';
-					}
-				}
-			}
-
-            // WordPress generator meta tag (most reliable)
-            if (str_contains($body, '<meta name="generator" content="WordPress')) {
-                return 'yes';
-            }
-
-            // WordPress core directory paths
-            if (str_contains($body, '/wp-content/') ||
-                str_contains($body, '/wp-includes/') ||
-                str_contains($body, '/wp-admin/')) {
-                return 'yes';
-            }
-
-            // WordPress REST API endpoints
-            if (str_contains($body, 'wp-json') ||
-                str_contains($body, '/wp-json/wp/v2/') ||
-                str_contains($body, 'wp-json/wp/v2/posts') ||
-                str_contains($body, 'wp-json/wp/v2/pages') ||
-                str_contains($body, 'wp-json/wp/v2/users')) {
-                return 'yes';
-            }
-
-            // WordPress admin and login pages
-            if (str_contains($body, 'wp-login.php') ||
-                str_contains($body, '/wp-admin/') ||
-                str_contains($body, 'wp-admin/css/login') ||
-                str_contains($body, 'wp-admin/css/forms')) {
-                return 'yes';
-            }
-
-            // WordPress XML-RPC and RSD (Really Simple Discovery)
-            if (str_contains($body, 'xmlrpc.php') ||
-                str_contains($body, 'EditURI') && str_contains($body, 'xmlrpc.php?rsd') ||
-                str_contains($body, 'Really Simple Discovery') ||
-                str_contains($body, 'rsd+xml')) {
-                return 'yes';
-            }
-
-            // WordPress-specific JavaScript and CSS files
-            if (str_contains($body, 'wp-emoji-release.min.js') ||
-                str_contains($body, 'wp-block-library') ||
-                str_contains($body, 'dashicons.min.css') ||
-                str_contains($body, '/wp-includes/js/') ||
-                str_contains($body, '/wp-includes/css/') ||
-                str_contains($body, 'wp-emoji') ||
-                str_contains($body, 'emoji-release')) {
-                return 'yes';
-            }
-
-            // WordPress theme and plugin paths
-            if (str_contains($body, '/wp-content/themes/') ||
-                str_contains($body, '/wp-content/plugins/') ||
-                str_contains($body, '/wp-content/uploads/') ||
-                str_contains($body, '/themes/twentytwentyfour/') ||
-                str_contains($body, '/themes/twentytwentythree/') ||
-                str_contains($body, '/themes/twentytwentytwo/')) {
-                return 'yes';
-            }
-
-            // WordPress-specific CSS classes and IDs
-            if (str_contains($body, 'class="wp-') ||
-                str_contains($body, 'id="wp-') ||
-                str_contains($body, 'wp-block-') ||
-                str_contains($body, 'wp-site-blocks') ||
-                str_contains($body, 'wp-container-') ||
-                str_contains($body, 'wp-image-') ||
-                str_contains($body, 'wp-caption') ||
-                str_contains($body, 'wp-attachment-')) {
-                return 'yes';
-            }
-
-            // WordPress comment system
-            if (str_contains($body, 'comment-form') ||
-                str_contains($body, 'comment-list') ||
-                str_contains($body, 'comment-body') ||
-                str_contains($body, 'comment-meta') ||
-                str_contains($body, 'wp-comment-') ||
-                str_contains($body, 'commentform')) {
-                return 'yes';
-            }
-
-            // WordPress version query strings (highly specific)
-            if (preg_match('/\.js\?ver=[\d.]+/', $body) ||
-                preg_match('/\.css\?ver=[\d.]+/', $body) ||
-                preg_match('/wp-[\w-]+\.min\.js\?ver=([\d.]+)/', $body) ||
-                preg_match('/wp-[\w-]+\.css\?ver=([\d.]+)/', $body)) {
-                return 'yes';
-            }
-
-            // WordPress unique functions and features
-            if (str_contains($body, 'wp_unique_id') ||
-                str_contains($body, 'wp_enqueue_script') ||
-                str_contains($body, 'wp_enqueue_style') ||
-                str_contains($body, 'wp_head') ||
-                str_contains($body, 'wp_footer')) {
-                return 'yes';
-            }
-
-            // WordPress pingback
-            if (str_contains($body, 'rel="pingback"')) {
-                return 'yes';
-            }
-
-            // WordPress media and gallery patterns
-            if (str_contains($body, 'wp-block-image') ||
-                str_contains($body, 'wp-block-gallery') ||
-                str_contains($body, 'gallery-') && str_contains($body, 'wp-')) {
-                return 'yes';
-            }
-
-            // WordPress shortlinks
-            if (str_contains($body, 'rel="shortlink"') && str_contains($body, '?p=')) {
-                return 'yes';
-            }
-
-            return 'no';
-        } catch (\Exception $e) {
+            return $this->detector->detect($body, $response->getHeaders()) ? 'yes' : 'no';
+        } catch (\Throwable $e) {
             return 'no_http_reply';
         }
     }

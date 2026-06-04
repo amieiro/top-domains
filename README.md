@@ -87,6 +87,7 @@ The `top-domains:check-wp` command supports the following parameters:
 
 - `resume`: Resume the last incomplete batch instead of starting a new one.
 - `request_timeout`: Timeout in seconds for each HTTP request (default: 10).
+- `connect_timeout`: Timeout in seconds for establishing the connection (default: 4).
 - `domains_per_batch`: Number of domains to process per batch (default: 200).
 - `concurrent_requests`: Number of concurrent HTTP requests (default: 200).
 - `show_temp_results_every`: Show temporary results every X websites tested (default: 200).
