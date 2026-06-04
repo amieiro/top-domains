@@ -27,7 +27,8 @@ class CheckWordPressCommand extends Command
 		{--domains_per_batch= : Number of domains to process per batch (default: 200)}
 		{--concurrent_requests= : Number of concurrent HTTP requests (default: 200)}
 		{--show_temp_results_every= : Show temporary results every X websites tested (default: 200)}
-		{--domain_offset= : Number of domains to skip from the top of the list (default: 600000)}';
+		{--domain_offset= : Number of domains to skip from the top of the list (default: 600000)}
+		{--retry_http : Retry failed HTTPS requests over plain HTTP. Roughly doubles time for a tiny recall gain; default: off}';
 
     /**
      * The console command description.
@@ -107,6 +108,13 @@ class CheckWordPressCommand extends Command
     protected bool $appDebug;
 
     /**
+     * Whether to retry HTTPS failures over plain HTTP. Off by default because a
+     * second pass over the (large) failure set roughly doubles wall-clock for a
+     * negligible recall gain.
+     */
+    protected bool $retry_http = false;
+
+    /**
      * A single Guzzle client reused across batches so connections can be pooled.
      */
     protected Client $client;
@@ -130,6 +138,7 @@ class CheckWordPressCommand extends Command
         $this->concurrent_requests = (int) ($this->option('concurrent_requests') ?? $this->concurrent_requests);
         $this->show_temp_results_every = (int) ($this->option('show_temp_results_every') ?? $this->show_temp_results_every);
         $this->domain_offset = (int) ($this->option('domain_offset') ?? $this->domain_offset);
+        $this->retry_http = (bool) $this->option('retry_http');
 
         $this->appDebug = env('APP_DEBUG', false);
         $this->client = new Client;
@@ -160,13 +169,16 @@ class CheckWordPressCommand extends Command
 
             $responses = $this->makeConcurrentRequests($domains, 'https://');
 
-            // Retry hosts that failed over HTTPS using plain HTTP, since a share
-            // of them are only reachable there.
-            $failed = $domains->filter(fn ($domain) => $responses[$domain->id] === null)->values();
-            if ($failed->isNotEmpty()) {
-                foreach ($this->makeConcurrentRequests($failed, 'http://') as $domainId => $response) {
-                    if ($response !== null) {
-                        $responses[$domainId] = $response;
+            // Optionally retry hosts that failed over HTTPS using plain HTTP.
+            // Off by default: it roughly doubles wall-clock on the large failure
+            // set to recover only a handful of HTTP-only sites.
+            if ($this->retry_http) {
+                $failed = $domains->filter(fn ($domain) => $responses[$domain->id] === null)->values();
+                if ($failed->isNotEmpty()) {
+                    foreach ($this->makeConcurrentRequests($failed, 'http://') as $domainId => $response) {
+                        if ($response !== null) {
+                            $responses[$domainId] = $response;
+                        }
                     }
                 }
             }
@@ -248,7 +260,6 @@ class CheckWordPressCommand extends Command
                         [
                             'headers' => [
                                 'User-Agent' => $this->userAgent,
-                                'Range' => 'bytes=0-'.($this->max_body_bytes - 1),
                             ],
                             'allow_redirects' => true,
                             'timeout' => $this->request_timeout,

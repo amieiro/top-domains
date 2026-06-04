@@ -92,11 +92,21 @@ The `top-domains:check-wp` command supports the following parameters:
 - `concurrent_requests`: Number of concurrent HTTP requests (default: 200).
 - `show_temp_results_every`: Show temporary results every X websites tested (default: 200).
 - `domain_offset`: Number of domains to skip from the top of the list (default: 600,000).
+- `retry_http`: Retry failed HTTPS requests over plain HTTP. Off by default; it roughly doubles the run time to recover only a handful of HTTP-only sites.
 
 Example:
 ```bash
 php artisan top-domains:check-wp --resume --request_timeout=20 --domains_per_batch=500 --concurrent_requests=250 --show_temp_results_every=1000 --domain_offset=500000
 ```
+
+### Tuning Throughput
+
+Most of the run time is spent waiting on domains that never answer (often more than half of them), each one held until `request_timeout` expires. The work is network-bound, so the levers that change websites-per-second are:
+
+- **`concurrent_requests`**: the safe lever. More requests in flight means more time spent waiting in parallel, with no loss of coverage. Raise it until DNS, bandwidth, or the remote rate limits push back.
+- **`request_timeout`**: the aggressive lever. Lowering it (for example from 10 to 5) cuts the time spent on non-responding hosts, at the cost of dropping the slowest sites that would have answered late.
+
+`connect_timeout` fails dead hosts quickly without affecting healthy ones, so it is safe to keep low.
 ### Running in the Background
 
 To run the WordPress check command in the background and log its output, use:
